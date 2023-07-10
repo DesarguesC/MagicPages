@@ -1,13 +1,11 @@
 from enum import Enum, unique
-import numpy as np
+
 import cv2
 import torch
 from basicsr.utils import img2tensor
-from ldm.util import resize_numpy_image, get_resize_shape, Inter
+from ldm.util import resize_numpy_image
 from PIL import Image
 from torch import autocast
-from ldm.util import Inter
-
 
 
 @unique
@@ -227,24 +225,14 @@ def get_cond_color(opt, cond_image, cond_inp_type='image', cond_model=None):
     return color
 
 
-def get_cond_openpose(opt, cond_image, cond_inp_type='image', cond_model=None, train_mode=False):
+def get_cond_openpose(opt, cond_image, cond_inp_type='image', cond_model=None):
     if isinstance(cond_image, str):
         openpose_keypose = cv2.imread(cond_image)
     else:
         openpose_keypose = cv2.cvtColor(cond_image, cv2.COLOR_RGB2BGR)
-        
-    #openpose_keypose = resize_numpy_image(
-    #    openpose_keypose, max_resolution=opt.max_resolution, resize_short_edge=opt.resize_short_edge)
-    
-    if hasattr(opt, 'W') and hasattr(opt, 'H'):
-        openpose_keypose = cv2.resize(openpose_keypose, (opt.W,opt.H), interpolation=Inter[opt.inter])
-    else:
-        W, H = get_resize_shape(openpose_keypose.shape, max_resolution=opt.max_resolution, resize_short_edge=opt.resize_short_edge)
-        setattr(opt, 'W', W)
-        setattr(opt, 'H', H)
-        # print(Inter[opt.inter])
-        openpose_keypose = cv2.resize(openpose_keypose, (opt.W,opt.H), interpolation=Inter[opt.inter])
-
+    openpose_keypose = resize_numpy_image(
+        openpose_keypose, max_resolution=opt.max_resolution, resize_short_edge=opt.resize_short_edge)
+    opt.H, opt.W = openpose_keypose.shape[:2]
     if cond_inp_type == 'openpose':
         openpose_keypose = img2tensor(openpose_keypose).unsqueeze(0) / 255.
         openpose_keypose = openpose_keypose.to(opt.device)
@@ -253,16 +241,13 @@ def get_cond_openpose(opt, cond_image, cond_inp_type='image', cond_model=None, t
             openpose_keypose = cond_model(openpose_keypose)
         openpose_keypose = img2tensor(openpose_keypose).unsqueeze(0) / 255.
         openpose_keypose = openpose_keypose.to(opt.device)
-    # elif cond_imp_type == 'image' and not train_mode:
-    #     if str(type(openpose_keypose)) == "<class 'numpy.ndarray'>":
-    #         openpose_keypose = Image.fromarray(openpose_keypose)
-    #     with autocast('cuda', dtype=torch.float32):
-    #         openpose_keypose = cond_model(openpose_keypose)
-    #     openpose_keypose = img2tensor(openpose_keypose).unsqueeze(0) / 255.
-    #     openpose_keypose = openpose_keypose.to(opt.device)
+
     else:
         raise NotImplementedError
-        
+    print(type(openpose_keypose))
+    print(openpose_keypose.shape)
+    # 1 * 3 * 768 * resolution
+
     return openpose_keypose
 
 

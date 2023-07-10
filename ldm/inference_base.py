@@ -20,14 +20,14 @@ def get_base_argument_parser() -> argparse.ArgumentParser:
         '--outdir',
         type=str,
         help='dir to write results to',
-        default='./models/ori_out/',
+        default=None,
     )
 
     parser.add_argument(
         '--prompt',
         type=str,
         nargs='?',
-        default='',
+        default=None,
         help='positive prompt',
     )
 
@@ -41,7 +41,7 @@ def get_base_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--cond_path',
         type=str,
-        default='./models/test.png',
+        default=None,
         help='condition image path',
     )
 
@@ -71,7 +71,7 @@ def get_base_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--sd_ckpt',
         type=str,
-        default='models/v1-5-pruned-emaonly.ckpt',
+        default='models/sd-v1-4.ckpt',
         help='path to checkpoint of stable diffusion model, both .ckpt and .safetensor are supported',
     )
 
@@ -85,7 +85,7 @@ def get_base_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--adapter_ckpt',
         type=str,
-        default='./models/t2iadapter_openpose_sd14v1.pth',
+        default=None,
         help='path to checkpoint of adapter',
     )
 
@@ -250,7 +250,7 @@ def get_adapters(opt, cond_type: ExtraCondition):
     return adapter
 
 
-def diffusion_inference(opt, model, sampler, adapter_features, append_to_context=None, **kwargs):
+def diffusion_inference(opt, model, sampler, adapter_features, append_to_context=None):
     # get text embedding
     c = model.get_learned_conditioning([opt.prompt])
     if opt.scale != 1.0:
@@ -284,10 +284,15 @@ def diffusion_inference(opt, model, sampler, adapter_features, append_to_context
     return x_samples
 
 
-def train_inference(opt, c, model, sampler, adapter_features, cond_model=None, loss_mode=True, append_to_context=None):
+def train_inference(opt, model, sampler, adapter_features, cond_model, append_to_context=None):
+    # # openpose
+    # from ldm.modules.extra_condition.openpose.api import OpenposeInference
+    # embed_model = OpenposeInference().to(opt.device)
+
     # get text embedding
+    c = model.get_learned_conditioning([opt.prompt])
     if opt.scale != 1.0:
-        uc = model.get_learned_conditioning([DEFAULT_NEGATIVE_PROMPT])
+        uc = model.get_learned_conditioning([opt.neg_prompt])
     else:
         uc = None
     c, uc = fix_cond_shapes(model, c, uc)
@@ -295,17 +300,13 @@ def train_inference(opt, c, model, sampler, adapter_features, cond_model=None, l
     if not hasattr(opt, 'H'):
         opt.H = 512
         opt.W = 512
-        print('no------'*10)
-    # print(f'opt shape (inference): ({opt.H}, {opt.W})')
-    shape = [opt.C, opt.H // opt.factor, opt.W // opt.factor]    # fit the adapter feature
-    assert (opt.bsize//2)*2 == opt.bsize, 'bad batch size.'
-    # print(f'inference shape: {shape}')
-    # DDIMSampler
-   
+    shape = [opt.C, opt.H // opt.f, opt.W // opt.f]
+
+    # PLMSSampler
     *_, ratios, samples = sampler.sample(
         S=opt.steps,
         conditioning=c,
-        batch_size=opt.bsize // 2,
+        batch_size=1,
         shape=shape,
         verbose=False,
         unconditional_guidance_scale=opt.scale,
@@ -314,15 +315,11 @@ def train_inference(opt, c, model, sampler, adapter_features, cond_model=None, l
         features_adapter=adapter_features,
         append_to_context=append_to_context,
         cond_tau=opt.cond_tau,
-        loss_mode=loss_mode,  # need to be trained
+        loss_mode=True,  # need to be trained
     )
-    assert samples != None, '?'
-    # print(len(ratios['alphas']), len(samples))
-    assert len(ratios['alphas']) == len(samples), 'Fatal: Something went wrong in plms'
-    
+    assert len(ratios) == len(samples), 'Fatal: Something went wrong in plms'
     for i in range(len(samples)):
-        u = model.decode_first_stage(samples[i])
-        samples[i] = cond_model(torch.clamp((u + 1.) / 2., min=0., max=1.))
+        samples[i] = cond_model(model.decode_first_stage(torch.clamp((samples[i] + 1.0) / 2.0, min=0.0, max=1.0)))
 
     # seems no need to return an extra ratios matrix
     return samples, ratios

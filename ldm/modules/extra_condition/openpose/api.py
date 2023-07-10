@@ -15,9 +15,8 @@ remote_model_path = "https://huggingface.co/TencentARC/T2I-Adapter/blob/main/thi
 
 class OpenposeInference(nn.Module):
 
-    def __init__(self, train_mode=False):
+    def __init__(self):
         super().__init__()
-        self.train = train_mode
         body_modelpath = os.path.join('models', "body_pose_model.pth")
 
         if not os.path.exists(body_modelpath):
@@ -27,12 +26,8 @@ class OpenposeInference(nn.Module):
         self.body_estimation = Body(body_modelpath)
 
     def forward(self, x):
-        # amend
-        if not self.train:
-            x = x[:, :, ::-1].copy()
+        x = x[:, :, ::-1].copy()
         with torch.no_grad():
-            if self.train and not x.mode == 'RGB':
-                x = cv2.cvtColor(x.cpu().numpy(), cv2.COLOR_BGR2RGB)
             candidate, subset = self.body_estimation(x)
             canvas = np.zeros_like(x)
             canvas = util.draw_bodypose(canvas, candidate, subset)
